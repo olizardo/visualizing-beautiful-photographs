@@ -19,6 +19,8 @@
     library(FactoMineR)
     library(ggrepel)
     library(patchwork)
+    library(stringr)
+    library(RColorBrewer)
     conflicts_prefer(dplyr::filter)
     conflicts_prefer(dplyr::select)
     conflicts_prefer(dplyr::summarize)
@@ -26,103 +28,28 @@
 
 
 ```{r Getting and Recoding Data}
-    dat <- read_dta(here("cultdat.dta")) |> 
-    mutate(race = factor(race)) |>  
-    mutate(age = 
-        case_when(
-            age2 >= 17 & age2 <= 21 ~ "Age (17-21)",
-            age2 >= 22 & age2 <= 26 ~ "Age (22-28)",
-            age2 >= 29 & age2 <= 35 ~ "Age (29-35)",
-            age2 >= 36 & age2 <= 42 ~ "Age (36-42)",
-            age2 >= 43 & age2 <= 49 ~ "Age (43-49)",
-            age2 >= 50 & age2 <= 59 ~ "Age (50-59)",
-            age2 >= 60 & age2 <= 69 ~ "Age (60-69)",
-            age2 >= 70 ~ "Age (70+)"
-        )
-    ) |> 
-    mutate(age = factor(age)) |> 
-    mutate(educ = 
-        case_when(
-            educ == 1 ~ "Less than High School",
-            educ == 2 ~ "Less than High School",
-            educ == 3 ~ "High School",
-            educ == 4 ~ "Some College",
-            educ == 5 ~ "Some College",
-            educ == 6 ~ "College Degree",
-            educ == 7 ~ "Prof./Graduate Degree"
-        )
-    ) |> 
-    mutate(parented = 
-        case_when(
-            parented == 1 ~ "Less than High School",
-            parented == 2 ~ "Less than High School",
-            parented == 3 ~ "High School",
-            parented == 4 ~ "Some College",
-            parented == 5 ~ "Some College",
-            parented == 6 ~ "College Degree",
-            parented == 7 ~ "Prof./Graduate Degree"
-        )
-    ) |> 
-    mutate(educ = factor(educ), parented = factor(parented)) |>
-    rename(par.ed = parented) |> 
-    mutate(across(social:economic, as.numeric)) |> 
-    mutate(urban_rural =
-        case_when(
-            urban_rural < 3 ~ "Small Town",
-            urban_rural > 2 & urban_rural < 5 ~ "Midsized Town",
-            urban_rural > 4 ~ "Big City"
-        )
-    ) |> 
-    mutate(urban_rural = factor(urban_rural)) |> 
-    mutate(child_arts =
-        case_when(
-            child_arts < 3 ~ "Low Exposure to Arts as Child",
-            child_arts > 2 & child_arts < 6 ~ "Moderate Exposure to Arts as Child",
-            child_arts > 5 ~ "High Exposure to Arts as Child"
-        )
-    ) |> 
-    mutate(child_arts = factor(child_arts)) |> 
-    mutate(polviews = 
-        case_when(
-            poli <= 2.5 ~ "Liberal",
-            poli >= 5.5 ~ "Conservative",
-            poli > 2.5 & poli < 5.5 ~ "Moderate"
-        )
-    ) |> 
-    mutate(socpol = 
-        case_when(
-            social <= 2 ~ "Soc. Lib.",
-            social >= 6 ~ "Soc. Con.",
-            social > 2 & social < 6 ~ "Soc. Mod."
-        )
-    ) |> 
-    mutate(econpol = 
-        case_when(
-            economic <= 2 ~ "Econ. Lib.",
-            economic >= 6 ~ "Econ. Con.",
-            economic > 2 & economic < 6 ~ "Econ. Mod."
-        )
-    ) |> 
-    mutate(polviews = factor(polviews)) |> 
-    mutate(socpol = factor(socpol)) |> 
-    mutate(econpol = factor(econpol)) |> 
-    mutate(gender = factor(gender, labels = c("Woman", "Man", "Nonbinary/Other"))) |> 
-    rowwise() |> 
-        mutate(var.photo = var(c_across(landscape:snake))) |> 
-    ungroup() |> 
-    mutate(across(landscape:snake, ~factor(., labels = c("Be", "In", "Me", "Ug")))) |> 
-    filter(!is.na(var.photo)) |> 
-    select(c("age", "educ", "par.ed", "socpol", "econpol", "gender", "child_arts", "urban_rural", "var.photo"), landscape:snake) |> 
-    data.frame() |> 
-    na.omit()
+    source(here("recode.dat.R"))
+    dat <- recode.dat() |> 
+        select(
+            ends_with(".f"), 
+            -pol.f, -inq.f, 
+            var.photo, 
+            landscape:snake, 
+            -c(japanese.f:lebanese.f)
+            ) |> 
+        na.omit()
 ```
 
 ```{r MCA Analysis}
     sups <- which(dat$var.photo <= quantile(dat$var.photo, probs = 0.05))
-    mca.dat <- dat[, c(1:8, 10:29)]
-    mca.res <- MCA(mca.dat, 
-        graph = FALSE, ind.sup = sups, quali.sup = c(1:8))
-    col.names <- c("Dim.1", "Dim.2", "Dim.3", "Dim.4", "Dim.5")
+    mca.res <- MCA(
+        dat, graph = FALSE, 
+        ind.sup = sups, 
+        quali.sup = c(1:12), 
+        quanti.sup = 13,
+        ncp = 2
+        )
+    col.names <- paste("Dim.", 1:2, sep = "")
     colnames(mca.res$ind$coord) <- col.names
     colnames(mca.res$ind.sup$coord) <- col.names
     colnames(mca.res$quali.sup$coord) <- col.names
@@ -143,41 +70,106 @@
     p <- ggplot(cat.dat, aes(x = Dim.1, y = Dim.2, color = judgment, label = labels))
     p <- p + geom_vline(xintercept = 0, color = "gray", linewidth = 1)
     p <- p + geom_hline(yintercept = 0, color = "gray", linewidth = 1)
-    p <- p + geom_label_repel(size = 5.5, max.overlaps = 200, fontface = "bold", alpha = contrib)
-    p <- p + theme_minimal() + scale_color_manual(values = c("darkblue", "black", "darkorange", "darkred"))
-    p1 <- p + xlim(-3, 4.5) + ylim(-2.25, 2.25) + ggtitle("")
-    p1 + theme(legend.position = "top",
-                   legend.title = element_blank(),
-                   axis.text = element_text(size = 40),
-                   axis.title = element_text(size = 40),
-                   legend.text = element_text(size = 20)
-                   )
-    save_plot(here("cat-cloud.png"), height = 50, width = 50) 
+    p <- p + geom_text_repel(
+        size = 7, 
+        max.overlaps = 200, 
+        fontface = "bold", 
+        alpha = contrib,
+        key_glyph = "rect"
+        )
+    p <- p + theme_minimal() + ggtitle("Cloud of Survey Response Options")
+    p <- p + scale_color_brewer(palette = "Dark2", type = "qual", direction = 1) 
+    p <- p + labs(
+        x = "Interesting \u2190                                                 \u2192 Ugly",
+        y = "Beautiful \u2190                                    \u2192 Meaningless"
+        )
+    p <- p + scale_y_continuous(
+        sec.axis = dup_axis(), 
+        limits = c(-1.5, 2.25),
+        breaks = seq(-1.5, 2.5, by = 0.5)
+        )
+    p <- p + scale_x_continuous(
+        sec.axis = dup_axis(), 
+        limits = c(-4.5, 4.5),
+        breaks = seq(-4.5, 4.5, by = 0.5)
+        )
+    p1 <- p + theme(
+        legend.position = "bottom",
+        title = element_text(size = 32),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        axis.title.x = element_blank(),
+        axis.title.x.top = element_text(size = 32),
+        axis.text.x = element_text(size = 25),
+        axis.text.x.top = element_blank(),
+        axis.text.y = element_text(size = 25),
+        axis.text.y.right = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.y.right = element_text(size = 32)
+    ) 
+    #+ guides(color = guide_legend(override.aes = list(size = 10)))
+    p1
+    save_plot(here("Plots", "cat-cloud.png"), height = 50, width = 60) 
 ```
 
 ```{r Cloud of Supplementary Categories Plot}
-    library(wesanderson)
+    contrib <- log(mca.res$quali.sup$cos2[, 1] + mca.res$quali.sup$cos2[, 2])
+    contrib <- abs(min(contrib) + 0.01) - abs(contrib)
+    contrib = contrib/max(contrib)
     sup.dat <-data.frame(mca.res$quali.sup$coord) |> 
         mutate(labels = rownames(mca.res$quali.sup$coord)) |> 
-        mutate(cat.type = c(rep(1, 8), rep(2, 5), rep(3, 5), rep(4, 3), rep(5, 3), rep(6, 3), rep(7, 3), rep(8, 3))) |> 
-        mutate(cat.type = factor(cat.type))
+        mutate(cat.type = c(rep(1, 6), rep(2, 8), rep(3, 10), rep(4, 12), rep(5, 3), rep(3, 3), rep(6, 9), rep(7, 5))) |> 
+        mutate(cat.type = factor(cat.type, labels = c("Ethnoracial ID", "Age/Generation", "Cultural Capital", "Economic Capital", "City Size", "Politics/Religion", "Gender/Sexuality")))
     p <- ggplot(sup.dat, aes(x = Dim.1, y = Dim.2, color = cat.type, label = labels))
     p <- p + geom_vline(xintercept = 0, color = "gray", linewidth = 1)
     p <- p + geom_hline(yintercept = 0, color = "gray", linewidth = 1)
-    p <- p + geom_label_repel(size = 5.5, max.overlaps = 200, fontface = "bold")
-    p <- p + theme_minimal() + scale_color_manual(values = c(wes_palette("BottleRocket1")[1:4], wes_palette("BottleRocket2")[2:5]))
-    p2 <- p + xlim(-.6, .6) + ylim(-.3, .3) + ggtitle("")
-    p2 + theme(legend.position = "none",
-                   legend.title = element_blank(),
-                   axis.text = element_text(size = 40),
-                   axis.title = element_text(size = 40)
-                   )
-    save_plot(here("sup-cloud.png"), height = 50, width = 50) 
+    p <- p + geom_text_repel(
+        size = 7, 
+        max.overlaps = 200, 
+        fontface = "bold", 
+        alpha = contrib,
+        key_glyph = "rect"
+        )
+    p <- p + theme_minimal() + ggtitle("Cloud of Socio-Demographic Categories")
+    p <- p + scale_color_brewer(palette = "Dark2", type = "qual", direction = 1) 
+    p <- p + labs(
+        x = "Interesting \u2190                                          \u2192 Ugly",
+        y = "Beautiful \u2190                               \u2192 Meaningless"
+        )
+    p <- p + scale_y_continuous(
+        sec.axis = dup_axis(), 
+        limits = c(-0.5, 0.5),
+        breaks = seq(-0.5, 0.5, by = 0.1)
+        )
+    p <- p + scale_x_continuous(
+        sec.axis = dup_axis(), 
+        limits = c(-0.5, 0.5),
+        breaks = seq(-0.5, 0.5, by = 0.1)
+        )
+    p2 <- p + theme(
+        legend.position = "bottom",
+        title = element_text(size = 32),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        axis.title.x = element_blank(),
+        axis.title.x.top = element_text(size = 32),
+        axis.text.x = element_text(size = 25),
+        axis.text.x.top = element_blank(),
+        axis.text.y = element_text(size = 25),
+        axis.text.y.right = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.y.right = element_text(size = 32)
+        ) + guides(color = guide_legend(nrow = 1))
+    p2
+   save_plot(here("Plots", "sup-cloud.png"), height = 50, width = 60) 
 ```
 
 ```{r}
-    wrap_plots(p1, p2, ncol = 2, nrow = 1, widths = c(2, 1.25)) + plot_annotation(tag_levels = 'a', tag_suffix = ")") & theme(legend.position = "none", text = element_text(size = 30))
-    save_plot(here("main.png"), height = 60, width = 80) 
+    wrap_plots(p1, p2, ncol = 1, nrow = 2) + 
+        plot_annotation(tag_levels = 'a', tag_suffix = ")")  & 
+        theme(plot.tag.position = c(0, 1),
+        plot.tag = element_text(size = 42, hjust = 0, vjust = 0.92))
+    save_plot(here("Plots", "main.png"), height = 75, width = 65) 
 ```
 
 
@@ -185,7 +177,7 @@
     p <- fviz_eig(mca.res, choice = "eigenvalue")
     p <- p + theme(text = element_text(size = 16))
     p + geom_text(label = paste0(round(mca.res$eig[1:10, 2], 1),"%"), vjust=-1, hjust = 0.2,size = 5) + ggtitle("") + ylim(0, 0.2)
-    save_plot(here("eig.png"), height = 15, width = 20) 
+    save_plot(here("Plots", "eig.png"), height = 25, width = 20) 
 ```
 
 <!-- ```{r Bar plots of category importance}
